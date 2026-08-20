@@ -1903,14 +1903,16 @@ html,body{
   .uploadToggle small{font-size:8px}
 }
 
-.apiKeyPanel{margin:0 0 14px;padding:14px;border:1px solid #CBD5DB;border-radius:11px;background:#F8FAFC}
-.apiKeyHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:9px}
+
+
+.apiKeyPanel{margin:0 0 16px;padding:14px 16px;border:1px solid #CBD5DB;border-radius:12px;background:#F8FAFC}
+.apiKeyHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}
 .apiKeyHead strong{display:block;color:#17324D;font-size:12px;font-weight:900}
 .apiKeyHead span{display:block;color:#687783;font-size:10px;margin-top:3px}
 .apiKeyRow{display:flex;gap:8px}
-.apiKeyRow input{flex:1;min-width:0;padding:10px 11px;border:1px solid #CBD5DB;border-radius:9px;font-size:12px}
-.apiKeyRow button{border:0;border-radius:9px;padding:10px 13px;background:#17324D;color:#fff;font-weight:800;cursor:pointer}
-.apiKeyClear{border:0;background:transparent;color:#A33A3A;font-size:11px;cursor:pointer}
+.apiKeyRow input{flex:1;min-width:0;padding:10px 11px;border:1px solid #CBD5DB;border-radius:9px;font-size:12px;background:#fff}
+.apiKeyRow button{border:0;border-radius:9px;padding:10px 14px;background:#17324D;color:#fff;font-weight:800;cursor:pointer;white-space:nowrap}
+.apiKeyClear{border:0;background:transparent;color:#A33A3A;font-size:11px;font-weight:700;cursor:pointer}
 .apiKeyHint{font-size:9.5px;color:#687783;margin-top:7px;line-height:1.4}
 @media(max-width:700px){.apiKeyRow{flex-direction:column}.apiKeyRow button{width:100%}}
 </style>
@@ -1952,14 +1954,16 @@ html,body{
       <strong>🔑 Configurar chave da API</strong>
       <span id="apiKeyState">Nenhuma chave configurada neste navegador.</span>
     </div>
-    <button type="button" class="apiKeyClear" id="clearApiKeyBtn">Remover</button>
+    <button type="button" class="apiKeyClear" id="clearApiKeyBtn">Remover chave</button>
   </div>
   <div class="apiKeyRow">
-    <input id="apiKeyInput" type="password" autocomplete="off" placeholder="Cole sua chave da API aqui">
+    <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Cole sua chave da API">
     <button type="button" id="saveApiKeyBtn">Salvar neste navegador</button>
   </div>
-  <div class="apiKeyHint">A chave fica salva apenas neste navegador. Depois de configurada, não precisa informar novamente.</div>
+  <div class="apiKeyHint">A chave não fica no arquivo enviado ao GitHub. Ela é salva somente neste navegador.</div>
 </div>
+
+
 
     <div class="ph">
     <div>
@@ -1989,7 +1993,7 @@ html,body{
     </div>
   </div>
 
-  <div class="apiReadyNote">🔐 API configurada para uso interno</div><div class="monthStatus">
+  <div class="apiReadyNote"></div><div class="monthStatus">
     <span id="statusDot">●</span>
     <span id="statusText">Pronto para receber os dois PDFs.</span>
     <span class="saveState" id="saveState"></span>
@@ -2243,9 +2247,9 @@ function renderNext(r){const g={};r.proximo.forEach(x=>(g[x.departamento]??=[]).
 async function analisar(){
  if(!CURRENT||!PREVIOUS){setStatus("Selecione o PDF do mês atual e o PDF do mês anterior.");return}
  const key=(localStorage.getItem("wtc_api_key")||"").trim();
- if(!key){setStatus("Configure a chave da API antes de gerar o fechamento.");$("apiKeyInput")?.focus();return}
+ if(!key){setStatus("🔑 Configure e salve a chave da API antes de gerar o fechamento.");$("apiKeyInput")?.focus();return}
  $("analyzeBtn").disabled=true;
- setStatus("Preparando os PDFs para análise...");
+ setStatus("Lendo os PDFs e gerando o fechamento...");
  try{
   const [currentData,previousData]=await Promise.all([fileData(CURRENT),fileData(PREVIOUS)]);
   const payload={
@@ -2261,8 +2265,6 @@ async function analisar(){
    max_output_tokens:10000,
    store:false
   };
-
-  setStatus("Conectando à API e gerando o fechamento...");
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),180000);
   let resp;
@@ -2276,42 +2278,29 @@ async function analisar(){
     body:JSON.stringify(payload),
     signal:controller.signal
    });
-  }catch(networkError){
-   if(networkError?.name==="AbortError") throw networkError;
-   throw new Error("NETWORK_FETCH_FAILED");
-  }finally{
-   clearTimeout(timer);
-  }
+  }finally{clearTimeout(timer)}
 
   const raw=await resp.text();
-  let data;
-  try{data=JSON.parse(raw)}catch(_){data=null}
+  let data; try{data=JSON.parse(raw)}catch(_){data=null}
   if(!resp.ok){
-   const detail=data?.error?.message || raw || ("Erro HTTP "+resp.status);
-   throw new Error("API "+resp.status+": "+detail);
+   const detail=data?.error?.message||raw||("Erro HTTP "+resp.status);
+   throw Error("API "+resp.status+": "+detail);
   }
-
   let text=data?.output_text||"";
   if(!text&&Array.isArray(data?.output)){
    text=data.output.flatMap(x=>x.content||[])
     .filter(x=>x.type==="output_text")
     .map(x=>x.text||"").join("");
   }
-  if(!text.trim())throw new Error("A API respondeu, mas não retornou texto de análise.");
-
+  if(!text.trim())throw Error("A API respondeu, mas não retornou texto de análise.");
   RESULT=parseAI(text);
   render();
   save();
   setStatus("✓ Fechamento gerado e salvo neste navegador.",true);
-
  }catch(e){
   console.error("Erro da análise:",e);
   let msg=e?.message||String(e);
-  if(e?.name==="AbortError"){
-   msg="A análise demorou mais de 3 minutos. Tente novamente.";
-  }else if(msg==="NETWORK_FETCH_FAILED"){
-   msg="A chamada direta à API foi bloqueada antes de receber resposta. Verifique a conexão, extensões de privacidade/bloqueadores e tente abrir pelo link publicado em HTTPS.";
-  }
+  if(e?.name==="AbortError")msg="A análise demorou mais de 3 minutos. Tente novamente.";
   setStatus("❌ "+msg);
  }finally{
   $("analyzeBtn").disabled=false;
@@ -2352,8 +2341,13 @@ function closeUploadPanel(){
  }
 }
 
+
+
 (function(){
- const input=$("apiKeyInput"),saveBtn=$("saveApiKeyBtn"),clearBtn=$("clearApiKeyBtn"),state=$("apiKeyState");
+ const input=$("apiKeyInput");
+ const saveBtn=$("saveApiKeyBtn");
+ const clearBtn=$("clearApiKeyBtn");
+ const state=$("apiKeyState");
  function refreshApiKeyState(){
    const has=!!(localStorage.getItem("wtc_api_key")||"").trim();
    if(state)state.textContent=has?"✓ Chave configurada neste navegador.":"Nenhuma chave configurada neste navegador.";
@@ -2361,13 +2355,15 @@ function closeUploadPanel(){
  }
  saveBtn?.addEventListener("click",()=>{
    const value=(input?.value||"").trim();
-   if(!value){if(state)state.textContent="Cole uma chave válida antes de salvar.";return;}
+   if(!value){if(state)state.textContent="Cole uma chave antes de salvar.";return;}
    localStorage.setItem("wtc_api_key",value);
    refreshApiKeyState();
+   setStatus("✓ Chave da API salva neste navegador.",true);
  });
  clearBtn?.addEventListener("click",()=>{
    localStorage.removeItem("wtc_api_key");
    refreshApiKeyState();
+   setStatus("Chave da API removida deste navegador.");
  });
  refreshApiKeyState();
 })();
