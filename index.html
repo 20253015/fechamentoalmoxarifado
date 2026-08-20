@@ -1833,7 +1833,7 @@ html,body{
   }
 }
 
-/* V66 — upload recolhível */
+/* V67 — integração de análise corrigida; upload recolhível preservado */
 .uploadToggle{
   width:100%;
   display:flex;
@@ -2220,10 +2220,31 @@ async function analisar(){
  $("analyzeBtn").disabled=true;setStatus("Lendo os dois PDFs e montando o fechamento...");
  try{
   const content=[{type:"input_file",filename:CURRENT.name,file_data:await fileData(CURRENT)},{type:"input_file",filename:PREVIOUS.name,file_data:await fileData(PREVIOUS)},{type:"input_text",text:PROMPT}];
-  const resp=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:"gpt-5.6-luna",input:[{role:"user",content}],max_output_tokens:10000,store:false})});
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),120000);
+  let resp;
+  try{
+    resp=await fetch("https://api.openai.com/v1/responses",{
+      method:"POST",
+      mode:"cors",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":"Bearer "+key.trim()
+      },
+      body:JSON.stringify({model:"gpt-5.2",input:[{role:"user",content}],max_output_tokens:10000,store:false}),
+      signal:controller.signal
+    });
+  }catch(networkError){
+    if(networkError?.name==="AbortError") throw Error("A conexão demorou mais de 2 minutos. Tente novamente.");
+    throw Error("Não foi possível conectar à API de análise. Verifique sua conexão e se a chave/API permite chamadas diretas do navegador.");
+  }finally{clearTimeout(timeout)}
   const raw=await resp.text();if(!resp.ok)throw Error("API "+resp.status+": "+raw.slice(0,500));let d=JSON.parse(raw),text=d.output_text||"";if(!text&&Array.isArray(d.output))text=d.output.flatMap(x=>x.content||[]).filter(x=>x.type==="output_text").map(x=>x.text||"").join("");if(!text.trim())throw Error("A IA não retornou conteúdo.");
   RESULT=parseAI(text);render();save();setStatus("✓ Fechamento gerado e salvo neste navegador.",true);
- }catch(e){setStatus("❌ "+(e.message||e));}finally{$("analyzeBtn").disabled=false}
+ }catch(e){
+  const msg=String(e?.message||e||"Erro desconhecido.");
+  setStatus("❌ "+msg);
+  console.error("Erro na análise:",e);
+}finally{$("analyzeBtn").disabled=false}
 }
 function novoFechamento(){localStorage.removeItem("wtc_monthly_v51");RESULT=null;CURRENT=null;PREVIOUS=null;["currentFile","previousFile"].forEach(id=>{if($(id))$(id).value=""});if($("currentFileName"))$("currentFileName").textContent="Nenhum PDF selecionado";if($("previousFileName"))$("previousFileName").textContent="Nenhum PDF selecionado";setStatus("Novo fechamento iniciado. Selecione o mês atual e o mês anterior.")}
 window.analisar=analisar;window.novoFechamento=novoFechamento;
