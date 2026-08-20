@@ -1833,7 +1833,7 @@ html,body{
   }
 }
 
-/* V67 — integração de análise corrigida; upload recolhível preservado */
+/* V66 — upload recolhível */
 .uploadToggle{
   width:100%;
   display:flex;
@@ -1902,6 +1902,8 @@ html,body{
   .uploadToggle strong{font-size:10px}
   .uploadToggle small{font-size:8px}
 }
+
+
 </style>
 </head>
 <body>
@@ -1935,6 +1937,8 @@ html,body{
     <span class="uploadChevron" id="uploadChevron">⌄</span>
   </button>
   <div class="uploadBody" id="uploadBody" hidden>
+
+
     <div class="ph">
     <div>
       <h2>📅 Fechamento mensal</h2>
@@ -2216,35 +2220,65 @@ function renderGeneral(r){
 function renderNext(r){const g={};r.proximo.forEach(x=>(g[x.departamento]??=[]).push(x.texto));$("next").innerHTML=Object.keys(g).length?`<div class="nextGrid">${Object.entries(g).map(([d,v])=>`<div class="nextCard"><div class="actionDept">${esc(d)}</div><div>${v.map(esc).join(" • ")}</div></div>`).join("")}</div>`:"<div class='empty'>Nenhum direcionamento adicional.</div>"}
 async function analisar(){
  if(!CURRENT||!PREVIOUS){setStatus("Selecione o PDF do mês atual e o PDF do mês anterior.");return}
- const key='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';localStorage.setItem("wtc_api_key",key);
- $("analyzeBtn").disabled=true;setStatus("Lendo os dois PDFs e montando o fechamento...");
+ const key="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";
+ $("analyzeBtn").disabled=true;
+ setStatus("Lendo os PDFs e gerando o fechamento...");
  try{
-  const content=[{type:"input_file",filename:CURRENT.name,file_data:await fileData(CURRENT)},{type:"input_file",filename:PREVIOUS.name,file_data:await fileData(PREVIOUS)},{type:"input_text",text:PROMPT}];
+  const [currentData,previousData]=await Promise.all([fileData(CURRENT),fileData(PREVIOUS)]);
+  const payload={
+   model:"gpt-5.6-luna",
+   input:[{
+    role:"user",
+    content:[
+     {type:"input_file",filename:CURRENT.name,file_data:currentData},
+     {type:"input_file",filename:PREVIOUS.name,file_data:previousData},
+     {type:"input_text",text:PROMPT}
+    ]
+   }],
+   max_output_tokens:10000,
+   store:false
+  };
   const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),120000);
+  const timer=setTimeout(()=>controller.abort(),180000);
   let resp;
   try{
-    resp=await fetch("https://api.openai.com/v1/responses",{
-      method:"POST",
-      mode:"cors",
-      headers:{
-        "Content-Type":"application/json",
-        "Authorization":"Bearer "+key.trim()
-      },
-      body:JSON.stringify({model:"gpt-5.2",input:[{role:"user",content}],max_output_tokens:10000,store:false}),
-      signal:controller.signal
-    });
-  }catch(networkError){
-    if(networkError?.name==="AbortError") throw Error("A conexão demorou mais de 2 minutos. Tente novamente.");
-    throw Error("Não foi possível conectar à API de análise. Verifique sua conexão e se a chave/API permite chamadas diretas do navegador.");
-  }finally{clearTimeout(timeout)}
-  const raw=await resp.text();if(!resp.ok)throw Error("API "+resp.status+": "+raw.slice(0,500));let d=JSON.parse(raw),text=d.output_text||"";if(!text&&Array.isArray(d.output))text=d.output.flatMap(x=>x.content||[]).filter(x=>x.type==="output_text").map(x=>x.text||"").join("");if(!text.trim())throw Error("A IA não retornou conteúdo.");
-  RESULT=parseAI(text);render();save();setStatus("✓ Fechamento gerado e salvo neste navegador.",true);
+   resp=await fetch("https://api.openai.com/v1/responses",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
+    body:JSON.stringify(payload),
+    signal:controller.signal
+   });
+  }finally{clearTimeout(timer)}
+
+  const raw=await resp.text();
+  let data;
+  try{data=JSON.parse(raw)}catch(_){data=null}
+  if(!resp.ok){
+   const detail=data?.error?.message||raw||("Erro HTTP "+resp.status);
+   throw Error("API "+resp.status+": "+detail);
+  }
+
+  let text=data?.output_text||"";
+  if(!text&&Array.isArray(data?.output)){
+   text=data.output.flatMap(x=>x.content||[])
+    .filter(x=>x.type==="output_text")
+    .map(x=>x.text||"").join("");
+  }
+  if(!text.trim())throw Error("A API respondeu, mas não retornou texto de análise.");
+
+  RESULT=parseAI(text);
+  render();
+  save();
+  setStatus("✓ Fechamento gerado e salvo neste navegador.",true);
  }catch(e){
-  const msg=String(e?.message||e||"Erro desconhecido.");
+  console.error("Erro da análise:",e);
+  let msg=e?.message||String(e);
+  if(e?.name==="AbortError")msg="A análise demorou mais de 3 minutos. Tente novamente.";
+  else if(/Failed to fetch/i.test(msg))msg="Não foi possível conectar diretamente à API.";
   setStatus("❌ "+msg);
-  console.error("Erro na análise:",e);
-}finally{$("analyzeBtn").disabled=false}
+ }finally{
+  $("analyzeBtn").disabled=false;
+ }
 }
 function novoFechamento(){localStorage.removeItem("wtc_monthly_v51");RESULT=null;CURRENT=null;PREVIOUS=null;["currentFile","previousFile"].forEach(id=>{if($(id))$(id).value=""});if($("currentFileName"))$("currentFileName").textContent="Nenhum PDF selecionado";if($("previousFileName"))$("previousFileName").textContent="Nenhum PDF selecionado";setStatus("Novo fechamento iniciado. Selecione o mês atual e o mês anterior.")}
 window.analisar=analisar;window.novoFechamento=novoFechamento;
@@ -2280,6 +2314,8 @@ function closeUploadPanel(){
    btn.setAttribute("aria-expanded","false");
  }
 }
+
+
 </script>
 
 </body>
